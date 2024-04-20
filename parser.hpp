@@ -2,6 +2,7 @@
 #include <optional>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 
 namespace parser {
 
@@ -278,6 +279,29 @@ constexpr auto none_of(std::string_view chars) {
     }
     return std::nullopt;
   };
+}
+
+// parse an int (may begin with 0)
+constexpr auto int0_parser() {
+  using namespace std::literals;
+  return many1(one_of("0123456789"sv), 0,
+	       [](int acc, char c) { return (acc * 10) + (c - '0'); });
+}
+
+// parse an int (may not begin with 0)
+constexpr auto int1_parser() {
+  using namespace std::literals;
+  return bind(one_of("123456789"sv), [](char x, parser_input_t rest) {
+    return many(one_of("0123456789"sv), static_cast<int>(x - '0'),
+		[](int acc, char c) { return (acc * 10) + (c - '0'); })(rest);
+  });
+}
+
+// a parser for skipping whitespace
+constexpr auto skip_whitespace() {
+  constexpr auto ws_parser = make_char_parser(' ') | make_char_parser('\t') |
+			     make_char_parser('\n') | make_char_parser('\r');
+  return many(ws_parser, std::monostate{}, [](auto m, auto) { return m; });
 }
 
 }  // namespace parser
