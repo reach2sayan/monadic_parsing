@@ -244,6 +244,14 @@ constexpr auto make_string_parser(std::string_view str) {
   };
 }
 
+constexpr auto make_char_parser(char c) {
+  return [=](parser_input_t s) -> parser_result_t<char> {
+    if (s.empty() || s[0] != c) return std::nullopt;
+    return parser_result_t<char>(
+	std::make_pair(c, parser_input_t(s.data() + 1, s.size() - 1)));
+  };
+}
+
 // parse one of a set of chars
 constexpr auto one_of(std::string_view chars) {
   return [=](parser_input_t s) -> parser_result_t<char> {
