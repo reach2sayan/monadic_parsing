@@ -15,8 +15,8 @@ template <typename T>
 using parser_result_t = std::optional<std::pair<T, parser_input_t>>;
 
 // various parser out types
-template <typename P>
-using parser_r_v_t = std::result_of_t<P(parser_input_t)>;
+template <typename F>
+using parser_r_v_t = std::result_of_t<F(parser_input_t)>;
 template <typename P>
 using parser_pair_t = typename parser_r_v_t<P>::value_type;
 template <typename P>
@@ -30,26 +30,24 @@ constexpr auto fmap(F&& f, P&& p) {
   return
       [f = std::forward<F>(f), p = std::forward<P>(p)](parser_input_t i) -> R {
 	const auto r = p(i);
-	if (!r) return std::nullopt;
-	return R(std::make_pair(f(r->first), r->second));
+	return r ? R{std::make_pair(f(r->first), r->second)} : std::nullopt;
       };
 }
 
 // bind a function into a parser.
 // F :: (parser_t<P>, parser_input_t) -> a
 template <typename P, typename F>
-constexpr auto bind(P&& p, F&& f) {
+constexpr auto bind(F&& f, P&& p) {
   using R = std::result_of_t<F(parser_t<P>, parser_input_t)>;
   return [=](parser_input_t i) -> R {
     const auto r = p(i);
-    if (!r) return std::nullopt;
-    return f(r->first, r->second);
+    return r ? f(r->first, r->second) : std::nullopt;
   };
 }
 
 template <typename P, typename F>
 constexpr auto operator>>=(P&& p, F&& f) {
-  return bind(std::forward<P>(p), std::forward<F>(f));
+  return bind(std::forward<F>(f), std::forward<P>(p));
 }
 
 // lift a value into a parser
@@ -83,8 +81,7 @@ template <
 constexpr auto operator|(P1&& p1, P2&& p2) {
   return [=](parser_input_t i) {
     const auto r1 = p1(i);
-    if (r1) return r1;
-    return p2(i);
+    return r1 ? r1 : p2(i);
   };
 }
 
@@ -125,8 +122,7 @@ constexpr auto zero_or_one(P&& p) {
   using R = parser_result_t<parser_input_t>;
   return [p = std::forward<P>(p)](parser_input_t s) -> R {
     const auto r = p(s);
-    if (r) return r;
-    return R(std::make_pair(parser_input_t(s.data(), 0), s));
+    return r ? r : R(std::make_pair(parser_input_t(s.data(), 0), s));
   };
 }
 
@@ -173,9 +169,9 @@ constexpr auto many1(P&& p, T&& init, F&& f) {
   return [p = std::forward<P>(p), init = std::forward<T>(init),
 	  f = std::forward<F>(f)](parser_input_t s) -> parser_result_t<T> {
     const auto r = p(s);
-    if (!r) return std::nullopt;
-    return parser_result_t<T>(
-	accumulate_parse(r->second, p, f(init, r->first), f));
+    return r ? parser_result_t<T>(
+		   accumulate_parse(r->second, p, f(init, r->first), f))
+	     : std::nullopt;
   };
 }
 
@@ -195,8 +191,7 @@ constexpr auto option(T&& def, P&& p) {
   return
       [p = std::forward<P>(p), def = std::forward<T>(def)](parser_input_t s) {
 	const auto r = p(s);
-	if (r) return r;
-	return parser_result_t<T>(std::make_pair(def, s));
+	return r ? r : parser_result_t<T>(std::make_pair(def, s));
       };
 }
 
@@ -245,19 +240,10 @@ constexpr auto make_string_parser(std::string_view str) {
   };
 }
 
-constexpr auto make_char_parser(char c) {
-  return [=](parser_input_t s) -> parser_result_t<char> {
-    if (s.empty() || s[0] != c) return std::nullopt;
-    return parser_result_t<char>(
-	std::make_pair(c, parser_input_t(s.data() + 1, s.size() - 1)));
-  };
-}
-
 // parse one of a set of chars
 constexpr auto one_of(std::string_view chars) {
   return [=](parser_input_t s) -> parser_result_t<char> {
     if (s.empty()) return std::nullopt;
-    // basic_string_view::find is supposed to be constexpr, but no...
     auto j = std::find(chars.cbegin(), chars.cend(), s[0]);
     if (j != chars.cend()) {
       return parser_result_t<char>(
@@ -280,28 +266,4 @@ constexpr auto none_of(std::string_view chars) {
     return std::nullopt;
   };
 }
-
-// parse an int (may begin with 0)
-constexpr auto int0_parser() {
-  using namespace std::literals;
-  return many1(one_of("0123456789"sv), 0,
-	       [](int acc, char c) { return (acc * 10) + (c - '0'); });
-}
-
-// parse an int (may not begin with 0)
-constexpr auto int1_parser() {
-  using namespace std::literals;
-  return bind(one_of("123456789"sv), [](char x, parser_input_t rest) {
-    return many(one_of("0123456789"sv), static_cast<int>(x - '0'),
-		[](int acc, char c) { return (acc * 10) + (c - '0'); })(rest);
-  });
-}
-
-// a parser for skipping whitespace
-constexpr auto skip_whitespace() {
-  constexpr auto ws_parser = make_char_parser(' ') | make_char_parser('\t') |
-			     make_char_parser('\n') | make_char_parser('\r');
-  return many(ws_parser, std::monostate{}, [](auto m, auto) { return m; });
-}
-
 }  // namespace parser
